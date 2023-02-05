@@ -1,7 +1,7 @@
 # ARG_Virus
-scripts for viral metagenomics in the ARG project
-Folder virfinder contains scripts for parsing Virfinder viral contig identification results
-Folder virsorter contains scripts for parsing VirSorter viral contig identification results
+scripts for viral metagenomics in the ARG project  
+Folder virfinder contains scripts for parsing Virfinder viral contig identification results.  
+Folder virsorter contains scripts for parsing VirSorter viral contig identification results.  
 Folder fpremoval contains scripts for removing potential false positives in virfinder and virsorter reported viral contigs, aligning agaist three database:
    1. Busco conserved bacteria gene database
    2. CAT bacteria genome database
