@@ -1,0 +1,47 @@
+bootstrap: library
+from: ubuntu
+
+%setup ## singularity build --fakeroot ubuntu22_04.sif tryBuild.def
+    mkdir $SINGULARITY_ROOTFS/test
+ 
+%runscript
+
+    cd /groups/cgsd/shengxu/epilepsy/LauG_Metagenomics_CPOS-221215-MHWK-15822a/LauG_Metagenomics_CPOS-221215-MHWK-15822a/
+
+    function abl_meta {
+        megahit -1 clean_data/${i}_clean_1.fastq -2 clean_data/${i}_clean_2.fastq -t 48 -o ~/assemble/$i
+        metaphlan no_duplicated/${i}_good_out_R1.fastq,no_duplicated/${i}_good_out_R2.fastq --bowtie2out ~/epi_metaphlan_out/${i}.bowtie2.bz2 --nproc 40 --input_type fastq -o m_out/${i}.txt -t rel_ab_w_read_stats -s ~/epi_sam_out/${i}.sam
+        }
+    export -f abl_meta
+    parallel abl_meta ::: cat idlist
+
+    function dvfcont {python ~/run/virus/DeepVirFinder/dvf.py -i $1 -l 500 -c 12}
+    export -f dvfcont
+    parallel dvfcont ::: assemble/*/*.fa
+    
+    python run/epilepsy/run_prodigal.py
+    
+    function blastpN {
+    i=$(eval "echo "$1" | cut -d / -f1,2")
+    blastp -query $1 -db /groups/cgsd/dcmorgan/virusdb/refseq_viral_db -out $i/viral_hits.blast -outfmt 6
+    }
+    export -f blastpN
+    parallel blastpN ::: assemble/*/prod.prots
+
+
+
+
+%post
+    apt-get -y update && apt-get install -y lsb-release gcc wget git parallel && apt-get clean all
+    lsb_release -a
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    chmod +x Miniconda3-latest-Linux-x86_64.sh
+    bash Miniconda3-latest-Linux-x86_64.sh -b -f -p /miniconda3/
+    rm Miniconda3-latest-Linux-x86_64.sh
+    export PATH="/miniconda3/bin:$PATH"    
+
+    conda install python=3.6  -c bioconda numpy theano=1.0.3 keras=2.2.4 scikit-learn Biopython h5py megahit prodigal bowtie  
+    conda update --all
+    pip3 install pandas numpy MetaPhlan
+
+    git clone https://github.com/jessieren/DeepVirFinder
