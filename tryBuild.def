@@ -1,0 +1,88 @@
+bootstrap: library
+from: ubuntu
+
+%setup ## singularity build --fakeroot ubuntu22_04.sif tryBuild.def
+    mkdir $SINGULARITY_ROOTFS/test
+
+%files
+    # /groups/cgsd/shengxu/epilepsy/LauG_Metagenomics_CPOS-221215-MHWK-15822a/LauG_Metagenomics_CPOS-221215-MHWK-15822a/*
+    # /groups/cgsd/shengxu/epilepsy/LauG_Metagenomics_CPOS-221215-MHWK-15822a/LauG_Metagenomics_CPOS-221215-MHWK-15822a/old-data/*
+    
+%runscript
+
+    function abl_meta {
+        source activate py_rest
+        megahit -1 clean_data/${i}_clean_1.fastq -2 clean_data/${i}_clean_2.fastq -t 48 -o ~/assemble/$i
+        metaphlan no_duplicated/${i}_good_out_R1.fastq,no_duplicated/${i}_good_out_R2.fastq --bowtie2out ~/epi_metaphlan_out/${i}.bowtie2.bz2 --nproc 40 --input_type fastq -o m_out/${i}.txt -t rel_ab_w_read_stats -s ~/epi_sam_out/${i}.sam
+        }
+    export -f abl_meta
+    parallel abl_meta ::: /groups/cgsd/shengxu/epilepsy/LauG_Metagenomics_CPOS-221215-MHWK-15822a/LauG_Metagenomics_CPOS-221215-MHWK-15822a/*
+        parallel abl_meta ::: /groups/cgsd/shengxu/epilepsy/LauG_Metagenomics_CPOS-221215-MHWK-15822a/LauG_Metagenomics_CPOS-221215-MHWK-15822a/old-data/GMORE*
+
+    function dvfcont {
+    source activate dvf
+    python ~/DeepVirFinder/dvf.py -i $1 -l 500 -c 12
+    }
+    export -f dvfcont
+    parallel dvfcont ::: assemble/*/*.fa
+    
+    source activate py_rest
+    python run/epilepsy/run_prodigal.py
+    
+    function blastpN {
+    source activate py_rest
+    i=$(eval "echo "$1" | cut -d / -f1,2")
+    blastp -query $1 -db /groups/cgsd/dcmorgan/virusdb/refseq_viral_db -out $i/viral_hits.blast -outfmt 6
+    }
+    export -f blastpN
+    parallel blastpN ::: assemble/*/prod.prots
+    
+    source activate py_rest
+    python run/epilepsy/filter_blast.py
+    
+    ### function m_bbmap {bbmap.sh in='clean_data/${i}_clean_#.fastq' out=mapped.sam ref=${i}/blast_contigs.fa nodisk}
+    function m_bbmap {i=$(eval "echo "$1" | cut -d / -f9 |cut -d _ -f1")
+    tr ',' '\n' < ~/assemble/${i}/blast_contigs.fa > ~/assemble/${i}/new_file.txt
+    bowtie2-build ~/assemble/${i}/new_file.txt ~/assemble/${i}/GMOREA0041_v
+    bowtie2 -x ~/assemble/${i}/GMOREA0041_v -1 ${1}_clean_1.fastq -2 ${1}_clean_2.fastq -S ~/assemble/${i}/eg2.sam
+    samtools view -bS ~/assemble/${i}/eg2.sam > ~/assemble/${i}/aln.bam
+    samtools sort ~/assemble/${i}/aln.bam -o ~/assemble/${i}/sorted_aln.bam
+    samtools idxstats ~/assemble/${i}/sorted_aln.bam > ~/assemble/${i}/idxstats.txt'
+}
+    export -f m_bbmap
+    parallel m_bbmap ::: /groups/cgsd/shengxu/epilepsy/LauG_Metagenomics_CPOS-221215-MHWK-15822a/LauG_Metagenomics_CPOS-221215-MHWK-15822a/clean_data/*
+    
+    for subdir in *; do cp $subdir/idxstats.txt $subdir.idxstats.txt; done;
+    find . -size 0 -delete
+    python2 ~/run/epilepsy/mapping_tools/get_count_table.py *.idxstats.txt > contig_counts.tsv
+
+    python plot_abundance.py
+
+%post
+    apt-get -y update && apt-get install -y lsb-release gcc wget git python3-pip curl bzip2 parallel && apt-get clean all
+    lsb_release -a
+    
+    ## attempt conda
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    chmod +x Miniconda3-latest-Linux-x86_64.sh
+    bash Miniconda3-latest-Linux-x86_64.sh -b -f -p /miniconda3/
+    rm Miniconda3-latest-Linux-x86_64.sh
+    export PATH="/miniconda3/bin:$PATH"
+    conda create -n py_rest -c bioconda numpy pandas megahit prodigal bowtie  bbmap
+    
+    ## attempt mamba native
+    # curl micro.mamba.pm/install.sh | bash   
+    # ./bin/micromamba shell init -s bash -p /opt/conda
+    # grep -v '[ -z "\$PS1" ] && return' /root/.bashrc  > /opt/conda/bashrc
+    # eval "$(/root/.local/bin/micromamba shell hook --shell=bash)"
+    # /root/.local/bin/micromamba create -n py36_mamba -y -c conda-forge
+    # /root/.local/bin/micromamba activate py36_mamba
+    # /root/.local/bin/micromamba install -c bioconda python=3.6 numpy theano=1.0.3 keras=2.2.4 scikit-learn Biopython h5py megahit prodigal bowtie bbmap
+
+    
+    
+    conda create --name dvf python=3.6 numpy theano=1.0.3 keras=2.2.4 scikit-learn Biopython h5py
+    # source activate dvf
+    
+    pip3 install pandas MetaPhlan
+    git clone https://github.com/jessieren/DeepVirFinder
